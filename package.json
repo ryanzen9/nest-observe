@@ -1,0 +1,96 @@
+{
+  "name": "@ryanzen9/nest-observe",
+  "version": "0.1.0",
+  "description": "Zero-config, vendor-neutral OpenTelemetry observability for NestJS",
+  "keywords": [
+    "nestjs",
+    "opentelemetry",
+    "observability",
+    "otlp",
+    "tracing",
+    "metrics",
+    "logging"
+  ],
+  "license": "MIT",
+  "sideEffects": [
+    "./dist/register.js",
+    "./dist/register.mjs"
+  ],
+  "main": "./dist/index.js",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.mts",
+        "default": "./dist/index.mjs"
+      },
+      "require": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      }
+    },
+    "./register": {
+      "import": {
+        "types": "./dist/register.d.mts",
+        "default": "./dist/register.mjs"
+      },
+      "require": {
+        "types": "./dist/register.d.ts",
+        "default": "./dist/register.js"
+      }
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm typecheck && pnpm test && pnpm build"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "peerDependencies": {
+    "@nestjs/common": ">=10 <13",
+    "@nestjs/core": ">=10 <13",
+    "reflect-metadata": ">=0.1.12 <1",
+    "rxjs": "^7.1.0"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "^1.9.0",
+    "@opentelemetry/api-logs": "^0.221.0",
+    "@opentelemetry/exporter-logs-otlp-proto": "^0.221.0",
+    "@opentelemetry/exporter-metrics-otlp-proto": "^0.221.0",
+    "@opentelemetry/exporter-trace-otlp-proto": "^0.221.0",
+    "@opentelemetry/instrumentation": "^0.221.0",
+    "@opentelemetry/instrumentation-http": "^0.221.0",
+    "@opentelemetry/instrumentation-nestjs-core": "^0.67.0",
+    "@opentelemetry/resources": "^2.10.0",
+    "@opentelemetry/sdk-logs": "^0.221.0",
+    "@opentelemetry/sdk-metrics": "^2.10.0",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@opentelemetry/sdk-trace-node": "^2.10.0",
+    "@prisma/instrumentation": "^7.10.0"
+  },
+  "devDependencies": {
+    "@nestjs/common": "^12.0.1",
+    "@nestjs/core": "^12.0.1",
+    "@nestjs/testing": "^12.0.1",
+    "@opentelemetry/sdk-trace-base": "^2.10.0",
+    "@types/node": "^24.0.0",
+    "reflect-metadata": "^0.2.2",
+    "rxjs": "^7.8.2",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.1.11"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
