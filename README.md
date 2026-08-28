@@ -1,17 +1,17 @@
-# @ryanzen9/nest-observe
+# @ryanzeng/nest-observe
 
 面向 NestJS 的零配置、Vendor Neutral Observability SDK。基于 OpenTelemetry，通过标准 OTLP 同时发送 Traces、Metrics 和 Logs，可连接 OpenObserve、Grafana、Jaeger、Datadog、Elastic 等兼容后端。
 
 ## 快速开始
 
 ```bash
-pnpm add @ryanzen9/nest-observe
+pnpm add @ryanzeng/nest-observe
 ```
 
 把注册入口放在应用入口的第一条 import（必须早于 `@nestjs/core` 和业务模块）：
 
 ```ts
-import '@ryanzen9/nest-observe/register';
+import '@ryanzeng/nest-observe/register';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
@@ -44,7 +44,7 @@ OBSERVE_ENVIRONMENT=production
 
 ```ts
 import { Module } from '@nestjs/common';
-import { ObserveModule } from '@ryanzen9/nest-observe';
+import { ObserveModule } from '@ryanzeng/nest-observe';
 
 @Module({
   imports: [ObserveModule.forRoot()],
@@ -56,7 +56,7 @@ export class AppModule {}
 
 ```ts
 import { Injectable } from '@nestjs/common';
-import { IgnoreTrace, Trace } from '@ryanzen9/nest-observe';
+import { IgnoreTrace, Trace } from '@ryanzeng/nest-observe';
 
 @Injectable()
 export class OrderService {
@@ -109,7 +109,7 @@ HTTP 与 Nest method 指标只使用 route template、method、status、controll
 ## 程序化配置
 
 ```ts
-import { observe } from '@ryanzen9/nest-observe';
+import { observe } from '@ryanzeng/nest-observe';
 
 const telemetry = observe({
   serviceName: 'mall-app',

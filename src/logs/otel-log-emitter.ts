@@ -1,8 +1,11 @@
-import { context, type Attributes } from '@opentelemetry/api';
-import { logs, SeverityNumber, type Logger } from '@opentelemetry/api-logs';
-import type { StructuredLogEmitter, StructuredLogRecord } from './types';
+import { context, type Attributes } from "@opentelemetry/api";
+import { logs, SeverityNumber, type Logger } from "@opentelemetry/api-logs";
+import type { StructuredLogEmitter, StructuredLogRecord } from "./types";
 
-const SEVERITY_NUMBER: Record<StructuredLogRecord['severityText'], SeverityNumber> = {
+const SEVERITY_NUMBER: Record<
+  StructuredLogRecord["severityText"],
+  SeverityNumber
+> = {
   TRACE: SeverityNumber.TRACE,
   DEBUG: SeverityNumber.DEBUG,
   INFO: SeverityNumber.INFO,
@@ -14,7 +17,11 @@ const SEVERITY_NUMBER: Record<StructuredLogRecord['severityText'], SeverityNumbe
 export class OpenTelemetryLogEmitter implements StructuredLogEmitter {
   private readonly logger: Logger;
 
-  constructor(name = '@ryanzen9/nest-observe', version?: string, logger?: Logger) {
+  constructor(
+    name = "@ryanzeng/nest-observe",
+    version?: string,
+    logger?: Logger,
+  ) {
     this.logger = logger ?? logs.getLogger(name, version);
   }
 
@@ -24,7 +31,9 @@ export class OpenTelemetryLogEmitter implements StructuredLogEmitter {
       severityText: record.severityText,
       severityNumber: SEVERITY_NUMBER[record.severityText],
       attributes: record.attributes as Attributes,
-      ...(record.timestamp === undefined ? {} : { timestamp: record.timestamp }),
+      ...(record.timestamp === undefined
+        ? {}
+        : { timestamp: record.timestamp }),
       context: context.active(),
     });
   }

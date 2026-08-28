@@ -1,5 +1,5 @@
 {
-  "name": "@ryanzen9/nest-observe",
+  "name": "@ryanzeng/nest-observe",
   "version": "0.1.0",
   "description": "Zero-config, vendor-neutral OpenTelemetry observability for NestJS",
   "keywords": [
