@@ -38,6 +38,10 @@ OBSERVE_ENVIRONMENT=production
 
 初始化或 exporter 配置失败时，SDK 会降级为 no-op，不会阻止业务应用启动。
 
+## OpenObserve 完整示例
+
+仓库内的 [`example`](./example) 是一个可直接运行的 NestJS 应用，包含本地 OpenObserve Docker Compose、环境变量模板、成功/异常接口和 E2E 测试。完整步骤见 [`example/README.md`](./example/README.md)。
+
 ## Nest Module
 
 `register` 已能在加载阶段自动挂载 HTTP、Nest Controller、Provider、Prisma 和 Logger instrumentation。也可以导入全局 Module；它为较晚初始化或测试场景提供 Discovery fallback，并在 Nest 关闭时 flush/shutdown：
