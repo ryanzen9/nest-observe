@@ -1,5 +1,5 @@
 import { context, trace } from '@opentelemetry/api';
-import { Logger } from '@nestjs/common';
+import { ConsoleLogger, Logger } from '@nestjs/common';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { NestLoggerInstrumentation, type StructuredLogRecord } from '../src/logs';
@@ -56,6 +56,27 @@ describe('NestLoggerInstrumentation', () => {
       { event: 'created', password: '[REDACTED]' },
       { orderId: 42 },
     ]);
+  });
+
+  it('respects Nest log level filtering so exports match console output', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    instrumentation.enable();
+
+    const filtered = new ConsoleLogger('FilteredService', { logLevels: ['error', 'fatal'] });
+    filtered.log('not exported');
+    filtered.warn('not exported either');
+    filtered.error('exported');
+
+    const adjusted = new ConsoleLogger('AdjustedService');
+    adjusted.setLogLevels(['fatal']);
+    adjusted.error('not exported after adjustment');
+    adjusted.fatal('exported');
+
+    instrumentation.disable();
+    output.mockRestore();
+    expect(records.map((record) => record.severityText)).toEqual(['ERROR', 'FATAL']);
   });
 
   it('never lets an emitter failure affect application logging', () => {

@@ -44,7 +44,7 @@ OBSERVE_ENVIRONMENT=production
 
 ## Nest Module
 
-`register` 已能在加载阶段自动挂载 HTTP、Nest Controller、Provider、Prisma 和 Logger instrumentation。也可以导入全局 Module；它为较晚初始化或测试场景提供 Discovery fallback，并在 Nest 关闭时 flush/shutdown：
+`register` 已能在加载阶段自动挂载 HTTP、Nest Controller、Provider 和 Logger instrumentation。也可以导入全局 Module；它为较晚初始化或测试场景提供 Discovery fallback，并在 Nest 关闭时 flush/shutdown：
 
 ```ts
 import { Module } from '@nestjs/common';
@@ -57,6 +57,75 @@ export class AppModule {}
 ```
 
 Module-only 模式还会注册一个全局 Nest interceptor，补采因 HTTP 模块已经加载而无法挂载底层 hook 的已匹配 Controller 请求指标。它与早期 HTTP instrumentation 共享请求状态，不会重复计数。
+
+## 可选 Instrumentation
+
+核心包不内置 Prisma、Redis 或其他数据库客户端 instrumentation。应用只安装自己实际使用的适配包，并在目标客户端被加载之前注册：
+
+```bash
+# Prisma
+pnpm add @prisma/instrumentation
+
+# node-redis
+pnpm add @opentelemetry/instrumentation-redis
+
+# ioredis
+pnpm add @opentelemetry/instrumentation-ioredis
+
+# Pino / Winston（日志类，见"自动采集内容 → Logs"）
+pnpm add @opentelemetry/instrumentation-pino
+pnpm add @opentelemetry/instrumentation-winston
+```
+
+创建一个只负责注册应用级 instrumentation 的文件，例如 `src/observability.instrumentation.ts`：
+
+```ts
+import { registerInstrumentations } from '@opentelemetry/instrumentation';
+import { PrismaInstrumentation } from '@prisma/instrumentation';
+import { IORedisInstrumentation } from '@opentelemetry/instrumentation-ioredis';
+
+export const unregisterApplicationInstrumentations = registerInstrumentations({
+  instrumentations: [
+    new PrismaInstrumentation(),
+    new IORedisInstrumentation(),
+  ],
+});
+```
+
+如果应用使用的是 `redis` 包而不是 `ioredis`，替换为：
+
+```ts
+import { RedisInstrumentation } from '@opentelemetry/instrumentation-redis';
+
+new RedisInstrumentation();
+```
+
+然后将注册文件放在应用入口的最前面。使用早期 `register` 初始化时：
+
+```ts
+import './observability.instrumentation';
+import '@ryanzeng/nest-observe/register';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+```
+
+仅使用 `ObserveModule.forRoot()` 时同样先加载应用级 instrumentation：
+
+```ts
+import './observability.instrumentation';
+import { NestFactory } from '@nestjs/core';
+import { AppModule } from './app.module';
+```
+
+应用级 instrumentation 会使用 `nest-observe` 注册的全局 tracer provider，因此不应再创建第二个 `NodeTracerProvider` 或第二套 OTLP exporter。对于会重排 import 的 bundler，生产环境应使用 Node 的 `--require`（CommonJS）或 `--import`（ESM）预加载编译后的 instrumentation 文件，确保它早于 Prisma/Redis 客户端执行。
+
+### 为什么必须放在入口第一条 import
+
+OTel instrumentation 通过 hook Node 的模块加载器工作：当目标模块（如 `@prisma/client`）第一次被 require/import 时，hook 替换它的导出（`PrismaClient` 类等）；模块一旦进入 `require.cache`，加载流程不会再走一遍，hook 永远不会再触发。事后补救也不可行——ESM 命名空间只读，CJS 下应用已持有的类引用也不受缓存修改影响。
+
+而 import 的求值顺序是"先 imports、后模块体"：`import { AppModule }` 会把整个依赖图（包括 `PrismaService` → `@prisma/client`）加载完，之后才执行 main.ts 的函数体。因此任何运行在 Nest DI 生命周期里的注册（包括 `ObserveModule.forRoot()`）都晚于客户端加载——这正是 `forRoot()` 不提供第三方客户端 instrumentation 参数的原因，只有 import 声明顺序的第一位早于它。Nest 语义层采集（Controller/Provider 方法）不受此限制：那些对象由 DI 在运行时逐个创建，天然晚于 instrumentation 就位。
+
+OTel 官方对"注册过晚"的处理同样只是警告、无法补救（`_warnOnPreloadedModules`），所以放错位置的注册不会报错，只会静默失效——排查"span 没有出现"问题时，请先检查注册文件是否在入口第一条 import。
 
 ## 装饰器
 
@@ -90,17 +159,43 @@ export class OrderService {
 Traces：
 
 - Node HTTP client/server、Nest Controller/handler、Provider method
-- Prisma instrumentation
+- 应用可按需组合 Prisma、Redis、ioredis 等标准 OpenTelemetry instrumentation
 - `@Trace()` 自定义 span 和自然 parent/child context
 - Controller/Provider 异常事件、错误状态及 stack trace
 
 Logs：
 
 - 默认 Nest `Logger` 的 `verbose/debug/log/warn/error/fatal`
+- 尊重 Nest 11+ 的实例级日志级别过滤（`logLevels` / `setLogLevels` / `Logger.overrideLogger`），上传内容与控制台输出一致
 - 对象和数组消息会在脱敏后保持结构化 body，由观测后端或查询侧决定如何展开、展示或序列化
 - OTLP severity、`nestjs.context`、`trace_id`、`span_id`
 - `service.name`、`service.version`、`deployment.environment.name`
-- `StructuredLogEmitter` 抽象可用于后续 Pino/Winston adapter
+
+**采集边界**：自动桥接覆盖所有经过 `ConsoleLogger` 的日志（包括默认 `Logger`）。自定义 `LoggerService` 若完全不经过 `ConsoleLogger`（例如直接封装 Pino/Winston），不会被自动采集。两种接入方式：
+
+一是用 `StructuredLogEmitter` 桥接，在自定义 Logger 里显式 emit：
+
+```ts
+import { Injectable, LoggerService } from '@nestjs/common';
+import { OpenTelemetryLogEmitter, redact } from '@ryanzeng/nest-observe';
+
+@Injectable()
+export class CustomLogger implements LoggerService {
+  private readonly emitter = new OpenTelemetryLogEmitter();
+
+  error(message: unknown, context?: string): void {
+    // 继续执行你的 Pino/Winston 输出……
+    this.emitter.emit({
+      body: redact(message),
+      severityText: 'ERROR',
+      attributes: context ? { 'nestjs.context': context } : {},
+      timestamp: Date.now(),
+    });
+  }
+}
+```
+
+二是注册 OTel 官方的 `@opentelemetry/instrumentation-pino` 或 `@opentelemetry/instrumentation-winston`（方式同上方"可选 Instrumentation"），日志会使用 SDK 注册的全局 Logger Provider，进入同一条 OTLP 管道。
 
 Metrics：
 

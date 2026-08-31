@@ -5,7 +5,6 @@ import { OTLPMetricExporter } from '@opentelemetry/exporter-metrics-otlp-proto';
 import { OTLPTraceExporter } from '@opentelemetry/exporter-trace-otlp-proto';
 import { registerInstrumentations, type Instrumentation } from '@opentelemetry/instrumentation';
 import { HttpInstrumentation } from '@opentelemetry/instrumentation-http';
-import { PrismaInstrumentation } from '@prisma/instrumentation';
 import { BatchLogRecordProcessor, LoggerProvider, type LogRecordExporter } from '@opentelemetry/sdk-logs';
 import { AggregationType, MeterProvider, PeriodicExportingMetricReader, type MetricReader } from '@opentelemetry/sdk-metrics';
 import { AlwaysOffSampler, BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
@@ -282,7 +281,6 @@ export function observe(options: ObserveOptions = {}): ObserveRuntime {
         providerTracing: config.providerTracing,
         controllerTracing: config.controllerTracing,
       }));
-      if (config.traces) instrumentations.push(new PrismaInstrumentation() as unknown as Instrumentation);
       registerInstrumentations({
         instrumentations,
         ...(tracerProvider ? { tracerProvider } : {}),

@@ -49,6 +49,16 @@ export class NestLoggerInstrumentation {
         ...args: unknown[]
       ) {
         try {
+          // Nest 11+ filters log levels per instance (constructor logLevels,
+          // setLogLevels, Logger.overrideLogger). Honor the same gate so
+          // exported records match console output. Nest 10 has no
+          // isLevelEnabled, so the feature check keeps exports unconditional.
+          const gated = this as ConsoleLoggerWithContext & {
+            isLevelEnabled?: (level: LogMethod) => boolean;
+          };
+          if (typeof gated.isLevelEnabled === "function" && !gated.isLevelEnabled(method)) {
+            return original.call(this, message, ...args);
+          }
           const spanContext = trace.getActiveSpan()?.spanContext();
           const contextName =
             this.context ??
