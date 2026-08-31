@@ -36,7 +36,7 @@ OBSERVE_ENVIRONMENT=production
 
 通用 endpoint 会自动派生 `/v1/traces`、`/v1/metrics` 和 `/v1/logs`。也可使用标准的 `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT`、`OTEL_EXPORTER_OTLP_METRICS_ENDPOINT`、`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` 分别覆盖。
 
-初始化或 exporter 配置失败时，SDK 会降级为 no-op，不会阻止业务应用启动。
+初始化或 exporter 配置失败时，SDK 默认保持 fail-open，不会阻止业务应用启动；同时会把脱敏、限频后的诊断信息写入 `stderr`，避免观测链路静默失效。
 
 ## OpenObserve 完整示例
 
@@ -55,6 +55,8 @@ import { ObserveModule } from '@ryanzeng/nest-observe';
 })
 export class AppModule {}
 ```
+
+Module-only 模式还会注册一个全局 Nest interceptor，补采因 HTTP 模块已经加载而无法挂载底层 hook 的已匹配 Controller 请求指标。它与早期 HTTP instrumentation 共享请求状态，不会重复计数。
 
 ## 装饰器
 
@@ -95,6 +97,7 @@ Traces：
 Logs：
 
 - 默认 Nest `Logger` 的 `verbose/debug/log/warn/error/fatal`
+- 对象和数组消息会在脱敏后序列化成 JSON 字符串，保证 OpenObserve 的标准 `body` 字段始终可见
 - OTLP severity、`nestjs.context`、`trace_id`、`span_id`
 - `service.name`、`service.version`、`deployment.environment.name`
 - `StructuredLogEmitter` 抽象可用于后续 Pino/Winston adapter
@@ -109,6 +112,8 @@ Metrics：
 - `nestjs.method.calls`、`nestjs.method.duration`、`nestjs.method.errors`
 
 HTTP 与 Nest method 指标只使用 route template、method、status、controller/provider/method 等有限维度，避免把 URL id 或请求数据变成高基数标签。
+
+OpenObserve 会把 OTel metric 名称中的 `.` 转换为 `_`，例如 `process.uptime` 对应 `process_uptime` stream，`http.server.request.count` 对应 `http_server_request_count`。指标使用独立的 Metrics streams，不在 Logs 的 `default` stream 中；首次数据默认最多需要等待 `metricExportIntervalMillis`（默认 60 秒），也可以调用 `forceFlush()` 立即导出。应用关闭时 SDK 会先采集并 flush runtime observable metrics，再移除 callbacks。
 
 ## 程序化配置
 
@@ -133,6 +138,27 @@ await telemetry.shutdown();
 ```
 
 环境变量方式仍是推荐方式。有合理默认值的配置无需填写。
+
+### 故障诊断
+
+SDK 会区分本地 pipeline 已启动和远端导出是否健康。`status` 可能为 `inactive`、`starting`、`active`、`degraded` 或 `stopped`；例如 OTLP endpoint 返回 401 时，业务继续运行，但状态会变为 `degraded`：
+
+```ts
+const telemetry = observe({
+  serviceName: 'mall-app',
+  endpoint: 'https://observe.example.com',
+  onError(event) {
+    // event.error 已脱敏，不包含 Authorization、token 等凭据。
+    console.error(event.signal, event.stage, event.error.message);
+  },
+});
+
+console.log(telemetry.status, telemetry.lastError);
+```
+
+默认诊断日志直接写入原始 `stderr`，不会经过 Nest Logger，因而不会形成“导出失败日志再次导出”的递归。相同错误在恢复前只报告一次。可以设置 `diagnosticLogging: false` 关闭默认输出，并继续通过 `onError` 接收事件。
+
+同步初始化失败默认返回 `started: false`、`status: 'inactive'` 的 handle。测试或严格部署场景可以设置 `failFast: true`，让同步初始化错误直接阻止 Nest 启动；异步 OTLP 导出错误仍采用 fail-open，并通过 `degraded`、`lastError` 和 `onError` 暴露。
 
 ### Sampling
 

@@ -104,6 +104,8 @@ export function resolveObserveConfig(
     exportTimeoutMillis: positiveInteger(options.exportTimeoutMillis ?? env.OTEL_EXPORTER_OTLP_TIMEOUT, 10_000),
     metricExportIntervalMillis: positiveInteger(options.metricExportIntervalMillis ?? env.OTEL_METRIC_EXPORT_INTERVAL, 60_000),
     resourceAttributes,
+    diagnosticLogging: booleanValue(options.diagnosticLogging, true),
+    failFast: booleanValue(options.failFast, false),
   };
   if (options.exporters) result.exporters = options.exporters;
   return result;

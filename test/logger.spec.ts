@@ -20,7 +20,7 @@ describe('NestLoggerInstrumentation', () => {
 
     context.with(trace.setSpan(context.active(), span), () => {
       const logger = new Logger('OrderService');
-      logger.log('created');
+      logger.log({ event: 'created', token: 'jwt-secret' });
       logger.warn('slow');
       logger.error(new Error('failed'));
       logger.fatal('fatal');
@@ -35,6 +35,7 @@ describe('NestLoggerInstrumentation', () => {
       span_id: spanContext.spanId,
       'nestjs.context': 'OrderService',
     });
+    expect(records[0]?.body).toBe('{"event":"created","token":"[REDACTED]"}');
     expect(String(records[2]?.body)).toContain('failed');
   });
 

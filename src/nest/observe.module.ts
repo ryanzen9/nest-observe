@@ -1,6 +1,20 @@
-import { DynamicModule, Global, Inject, Injectable, Module, OnApplicationShutdown, OnModuleInit } from '@nestjs/common';
-import { DiscoveryModule, DiscoveryService } from '@nestjs/core';
+import {
+  type CallHandler,
+  type ExecutionContext,
+  DynamicModule,
+  Global,
+  Inject,
+  Injectable,
+  Module,
+  type NestInterceptor,
+  OnApplicationShutdown,
+  OnModuleInit,
+} from '@nestjs/common';
+import { APP_INTERCEPTOR, DiscoveryModule, DiscoveryService } from '@nestjs/core';
 import { metrics, trace } from '@opentelemetry/api';
+import type { IncomingMessage, ServerResponse } from 'node:http';
+import type { Observable } from 'rxjs';
+import { finalize } from 'rxjs';
 import { getObserveRuntime, observe, type ObserveRuntime } from '../sdk';
 import type { ObserveOptions } from '../types';
 import { SDK_NAME, SDK_VERSION } from '../resource';
@@ -8,6 +22,39 @@ import { NestMethodInstrumenter } from './method-instrumenter';
 
 export const OBSERVE_OPTIONS = Symbol('OBSERVE_OPTIONS');
 export const OBSERVE_HANDLE = Symbol('OBSERVE_HANDLE');
+
+type FrameworkResponse = ServerResponse & {
+  raw?: ServerResponse;
+};
+
+/** Provides inbound HTTP metrics when module-load instrumentation was registered too late. */
+@Injectable()
+export class NestHttpMetricsInterceptor implements NestInterceptor {
+  constructor(@Inject(OBSERVE_HANDLE) private readonly handle: ObserveRuntime) {}
+
+  intercept(context: ExecutionContext, next: CallHandler): Observable<unknown> {
+    if (context.getType() !== 'http' || !this.handle.started || !this.handle.httpRequestMetrics) {
+      return next.handle();
+    }
+    const http = context.switchToHttp();
+    const request = http.getRequest<IncomingMessage>();
+    const response = http.getResponse<FrameworkResponse>();
+    const started = this.handle.httpRequestMetrics.start(request);
+    const result = next.handle();
+    if (!started) return result;
+
+    const responseEventSource = response.raw ?? response;
+    if (typeof responseEventSource.once === 'function') {
+      responseEventSource.once('finish', () => {
+        this.handle.httpRequestMetrics?.record(request, response);
+      });
+      return result;
+    }
+    return result.pipe(finalize(() => {
+      this.handle.httpRequestMetrics?.record(request, response);
+    }));
+  }
+}
 
 type DiscoveredWrapper = {
   instance?: object;
@@ -71,6 +118,7 @@ export class ObserveModule {
       providers: [
         { provide: OBSERVE_OPTIONS, useValue: options },
         { provide: OBSERVE_HANDLE, useFactory: () => observe(options) },
+        { provide: APP_INTERCEPTOR, useClass: NestHttpMetricsInterceptor },
         NestObserveExplorer,
       ],
       exports: [OBSERVE_HANDLE],

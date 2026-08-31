@@ -36,11 +36,16 @@ export class HttpRequestMetrics {
     });
   }
 
-  start(request: IncomingMessage): void {
+  start(request: IncomingMessage): boolean {
+    if (this.startedAt.has(request)) return false;
     this.startedAt.set(request, process.hrtime.bigint());
+    return true;
   }
 
-  record(request: IncomingMessage, response: ServerResponse): void {
+  record(request: IncomingMessage, response: ServerResponse): boolean {
+    const started = this.startedAt.get(request);
+    if (started === undefined) return false;
+    this.startedAt.delete(request);
     const statusCode = Number.isFinite(response.statusCode) ? response.statusCode : 0;
     const attributes = {
       'service.name': this.serviceName,
@@ -49,11 +54,8 @@ export class HttpRequestMetrics {
       'http.response.status_code': statusCode,
     };
     this.requestCount.add(1, attributes);
-    const started = this.startedAt.get(request);
-    if (started !== undefined) {
-      this.requestDuration.record(Number(process.hrtime.bigint() - started) / 1e9, attributes);
-      this.startedAt.delete(request);
-    }
+    this.requestDuration.record(Number(process.hrtime.bigint() - started) / 1e9, attributes);
     if (statusCode >= 500) this.errorCount.add(1, attributes);
+    return true;
   }
 }

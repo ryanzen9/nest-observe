@@ -17,7 +17,15 @@ const SEVERITY: Record<LogMethod, StructuredLogRecord['severityText']> = {
 
 function bodyValue(message: unknown): unknown {
   if (message instanceof Error) return redactText(message.stack ?? `${message.name}: ${message.message}`);
-  return redact(message);
+  const sanitized = redact(message);
+  if (sanitized === null || typeof sanitized !== 'object') return sanitized;
+  try {
+    return JSON.stringify(sanitized, (_key, value) => (
+      typeof value === 'bigint' ? value.toString() : value
+    ));
+  } catch {
+    return redactText(String(sanitized));
+  }
 }
 
 export class NestLoggerInstrumentation {

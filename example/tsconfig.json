@@ -11,7 +11,8 @@
     "skipLibCheck": true,
     "types": ["node", "vitest/globals"],
     "outDir": "dist",
-    "sourceMap": true
+    "sourceMap": true,
+    "resolveJsonModule": true,
   },
   "include": ["src", "test", "vitest.config.mts"]
 }

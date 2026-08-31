@@ -39,18 +39,20 @@ curl http://localhost:3000/orders/demo/failure
 
 等待约 10 秒后，可在 OpenObserve 中按 `service.name = nest-observe-example` 查看日志与链路；Metrics 页面可查看 `http.server.*`、`nestjs.method.*`、`process.*`、`nodejs.*` 等指标。失败接口会返回 500，用于演示异常事件、ERROR span 和错误日志之间的关联。
 
-## 关键接入点
+## 接入方式
+
+## 使用 import 进行自动 register
 
 入口文件的第一条 import 必须先初始化 SDK，早于 NestJS 和业务模块：
 
 ```ts
-import '@ryanzeng/nest-observe/register';
+import "@ryanzeng/nest-observe/register";
 ```
 
 应用模块导入全局模块，用于 Discovery fallback，并在应用关闭时 flush/shutdown：
 
 ```ts
-imports: [ObserveModule.forRoot()]
+imports: [ObserveModule.forRoot()];
 ```
 
 `.env` 中的通用 endpoint 必须包含 OpenObserve 组织，但不要包含 `/v1/traces` 等信号路径：
@@ -66,6 +68,47 @@ SDK 会分别派生 `/v1/traces`、`/v1/metrics` 和 `/v1/logs`。连接 OpenObs
 OTEL_EXPORTER_OTLP_ENDPOINT=https://api.openobserve.ai/api/<organization>
 OTEL_EXPORTER_OTLP_HEADERS=Authorization=Basic%20<token>
 ```
+
+## 使用 模块注入
+
+```ts
+import { ObserveModule } from "@ryanzeng/nest-observe";
+
+@Module({
+  imports: [
+    ObserveModule.forRoot({
+      enabled: true,
+      serviceName: SERVICE_NAME,
+      serviceVersion: SERVICE_VERSION,
+      environment: ENVIRONMENT,
+
+      endpoint: ENDPOINT,
+      headers: {
+        Authorization: AUTHORIZATION,
+      },
+
+      traces: true,
+      metrics: true,
+      logs: true,
+      sampling: 1,
+
+      controllerTracing: true,
+      providerTracing: true,
+      allowedHeaders: ["x-correlation-id"],
+
+      exportTimeoutMillis: 10_000,
+      metricExportIntervalMillis: 60_000,
+
+      onError(event) {
+        console.error(event.signal, event.stage, event.error.message);
+      },
+    }),
+  ],
+})
+export class AppModule {}
+```
+
+自定义传入相关参数，此处使用 `.env` 中的 `OBSERVE_ENDPOINT` 和 `OBSERVE_AUTHORIZATION`。
 
 不要提交包含真实凭据的 `.env`；本项目已忽略该文件。
 

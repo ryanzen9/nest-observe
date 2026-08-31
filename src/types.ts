@@ -9,6 +9,17 @@ export interface ObserveExporters {
   metricReader?: MetricReader;
 }
 
+export type ObserveSignal = 'sdk' | 'traces' | 'metrics' | 'logs';
+export type ObserveErrorStage = 'initialization' | 'export' | 'forceFlush' | 'shutdown';
+export type ObserveStatus = 'inactive' | 'starting' | 'active' | 'degraded' | 'stopped';
+
+export interface ObserveErrorEvent {
+  signal: ObserveSignal;
+  stage: ObserveErrorStage;
+  error: Error;
+  timestamp: number;
+}
+
 export interface ObserveOptions {
   enabled?: boolean;
   serviceName?: string;
@@ -27,6 +38,12 @@ export interface ObserveOptions {
   exportTimeoutMillis?: number;
   metricExportIntervalMillis?: number;
   resourceAttributes?: Record<string, string | number | boolean>;
+  /** Writes sanitized, rate-limited SDK/export failures to stderr. Defaults to true. */
+  diagnosticLogging?: boolean;
+  /** Receives sanitized pipeline failure notifications without affecting the application. */
+  onError?: (event: ObserveErrorEvent) => void;
+  /** Throws synchronous initialization failures instead of degrading to an inactive handle. */
+  failFast?: boolean;
   exporters?: ObserveExporters;
 }
 
@@ -52,11 +69,15 @@ export interface ResolvedObserveConfig {
   exportTimeoutMillis: number;
   metricExportIntervalMillis: number;
   resourceAttributes: Record<string, string | number | boolean>;
+  diagnosticLogging: boolean;
+  failFast: boolean;
   exporters?: ObserveExporters;
 }
 
 export interface ObserveHandle {
   readonly started: boolean;
+  readonly status: ObserveStatus;
+  readonly lastError: ObserveErrorEvent | undefined;
   readonly config: Readonly<ResolvedObserveConfig>;
   forceFlush(): Promise<void>;
   shutdown(): Promise<void>;

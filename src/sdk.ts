@@ -11,6 +11,7 @@ import { AggregationType, MeterProvider, PeriodicExportingMetricReader, type Met
 import { AlwaysOffSampler, BatchSpanProcessor, ParentBasedSampler, TraceIdRatioBasedSampler, type SpanExporter, type SpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { resolveObserveConfig } from './config';
+import { ObserveDiagnostics, toError, withExporterDiagnostics } from './diagnostics';
 import { ProcessExceptionCapture } from './exceptions/process-exception-capture';
 import { CompatibleNestInstrumentation } from './instrumentation';
 import { NestLoggerInstrumentation, OpenTelemetryLogEmitter } from './logs';
@@ -18,12 +19,20 @@ import { HttpRequestMetrics, RuntimeMetrics } from './metrics';
 import { createObserveResource, SDK_NAME, SDK_VERSION } from './resource';
 import { isSensitiveKey } from './security/redaction';
 import { SpanRedactionProcessor } from './security/span-redaction-processor';
-import type { ObserveHandle, ObserveOptions, ResolvedObserveConfig } from './types';
+import type {
+  ObserveErrorEvent,
+  ObserveHandle,
+  ObserveOptions,
+  ObserveSignal,
+  ObserveStatus,
+  ResolvedObserveConfig,
+} from './types';
 
 export interface ObserveRuntime extends ObserveHandle {
   readonly tracerProvider: NodeTracerProvider | undefined;
   readonly meterProvider: MeterProvider | undefined;
   readonly loggerProvider: LoggerProvider | undefined;
+  readonly httpRequestMetrics: HttpRequestMetrics | undefined;
 }
 
 class InactiveObserveHandle implements ObserveRuntime {
@@ -31,7 +40,13 @@ class InactiveObserveHandle implements ObserveRuntime {
   readonly tracerProvider = undefined;
   readonly meterProvider = undefined;
   readonly loggerProvider = undefined;
-  constructor(readonly config: Readonly<ResolvedObserveConfig>) {}
+  readonly httpRequestMetrics = undefined;
+  constructor(
+    readonly config: Readonly<ResolvedObserveConfig>,
+    private readonly diagnostics: ObserveDiagnostics,
+  ) {}
+  get status(): ObserveStatus { return this.diagnostics.status; }
+  get lastError(): ObserveErrorEvent | undefined { return this.diagnostics.lastError; }
   forceFlush(): Promise<void> { return Promise.resolve(); }
   shutdown(): Promise<void> { return Promise.resolve(); }
 }
@@ -45,36 +60,63 @@ class ActiveObserveHandle implements ObserveRuntime {
     readonly tracerProvider: NodeTracerProvider | undefined,
     readonly meterProvider: MeterProvider | undefined,
     readonly loggerProvider: LoggerProvider | undefined,
+    readonly httpRequestMetrics: HttpRequestMetrics | undefined,
     private readonly runtimeMetrics: RuntimeMetrics | undefined,
     private readonly loggerInstrumentation: NestLoggerInstrumentation | undefined,
     private readonly exceptionCapture: ProcessExceptionCapture,
     private readonly instrumentations: Instrumentation[],
+    private readonly diagnostics: ObserveDiagnostics,
   ) {}
 
+  get status(): ObserveStatus { return this.diagnostics.status; }
+  get lastError(): ObserveErrorEvent | undefined { return this.diagnostics.lastError; }
+
   async forceFlush(): Promise<void> {
-    await Promise.allSettled([
-      this.tracerProvider?.forceFlush(),
-      this.meterProvider?.forceFlush(),
-      this.loggerProvider?.forceFlush({ timeoutMillis: this.config.exportTimeoutMillis }),
-    ].filter((item): item is Promise<void> => Boolean(item)));
+    await this.runSafely('forceFlush', [
+      ...(this.config.traces && this.tracerProvider
+        ? [['traces', () => this.tracerProvider!.forceFlush()] as const]
+        : []),
+      ...(this.config.metrics && this.meterProvider
+        ? [['metrics', () => this.meterProvider!.forceFlush()] as const]
+        : []),
+      ...(this.config.logs && this.loggerProvider
+        ? [['logs', () => this.loggerProvider!.forceFlush({ timeoutMillis: this.config.exportTimeoutMillis })] as const]
+        : []),
+    ]);
   }
 
   async shutdown(): Promise<void> {
     if (this.stopped) return;
     this.stopped = true;
     this.loggerInstrumentation?.disable();
-    this.runtimeMetrics?.stop();
     this.exceptionCapture.stop();
     for (const instrumentation of this.instrumentations) {
-      try { instrumentation.disable(); } catch { /* best effort */ }
+      try { instrumentation.disable(); } catch (error) {
+        this.diagnostics.failure('sdk', 'shutdown', error);
+      }
     }
     await this.forceFlush();
-    await Promise.allSettled([
-      this.tracerProvider?.shutdown(),
-      this.meterProvider?.shutdown(),
-      this.loggerProvider?.shutdown(),
-    ].filter((item): item is Promise<void> => Boolean(item)));
+    this.runtimeMetrics?.stop();
+    await this.runSafely('shutdown', [
+      ...(this.tracerProvider ? [['traces', () => this.tracerProvider!.shutdown()] as const] : []),
+      ...(this.meterProvider ? [['metrics', () => this.meterProvider!.shutdown()] as const] : []),
+      ...(this.loggerProvider ? [['logs', () => this.loggerProvider!.shutdown()] as const] : []),
+    ]);
     if (activeRuntime === this) activeRuntime = undefined;
+    this.diagnostics.stop();
+  }
+
+  private async runSafely(
+    stage: 'forceFlush' | 'shutdown',
+    operations: ReadonlyArray<readonly [ObserveSignal, () => Promise<void>]>,
+  ): Promise<void> {
+    await Promise.all(operations.map(async ([signal, operation]) => {
+      try {
+        await operation();
+      } catch (error) {
+        this.diagnostics.failure(signal, stage, error);
+      }
+    }));
   }
 }
 
@@ -91,13 +133,18 @@ function exporterConfig(url: string | undefined, config: ResolvedObserveConfig) 
 function createTraceProvider(
   config: ResolvedObserveConfig,
   resource: ReturnType<typeof createObserveResource>,
+  diagnostics: ObserveDiagnostics,
 ) {
   if (!config.traces && !config.metrics) return undefined;
   const spanProcessors: SpanProcessor[] = [new SpanRedactionProcessor()];
   if (config.traces) {
-    const exporter: SpanExporter = config.exporters?.span
+    const exporter = config.exporters?.span
       ?? new OTLPTraceExporter(exporterConfig(config.endpoints.traces, config));
-    spanProcessors.push(new BatchSpanProcessor(exporter, {
+    spanProcessors.push(new BatchSpanProcessor(withExporterDiagnostics(
+      exporter,
+      'traces',
+      diagnostics,
+    ) as SpanExporter, {
       exportTimeoutMillis: config.exportTimeoutMillis,
       maxQueueSize: 2_048,
       maxExportBatchSize: 512,
@@ -115,14 +162,22 @@ function createTraceProvider(
   return provider;
 }
 
-function createMeterProvider(config: ResolvedObserveConfig, resource: ReturnType<typeof createObserveResource>) {
+function createMeterProvider(
+  config: ResolvedObserveConfig,
+  resource: ReturnType<typeof createObserveResource>,
+  diagnostics: ObserveDiagnostics,
+) {
   if (!config.metrics) return undefined;
   let reader: MetricReader;
   if (config.exporters?.metricReader) {
     reader = config.exporters.metricReader;
   } else {
     reader = new PeriodicExportingMetricReader({
-      exporter: new OTLPMetricExporter(exporterConfig(config.endpoints.metrics, config)),
+      exporter: withExporterDiagnostics(
+        new OTLPMetricExporter(exporterConfig(config.endpoints.metrics, config)),
+        'metrics',
+        diagnostics,
+      ),
       exportIntervalMillis: config.metricExportIntervalMillis,
       exportTimeoutMillis: Math.min(config.exportTimeoutMillis, config.metricExportIntervalMillis),
       cardinalityLimits: { default: 2_000, histogram: 2_000 },
@@ -141,14 +196,18 @@ function createMeterProvider(config: ResolvedObserveConfig, resource: ReturnType
   return provider;
 }
 
-function createLoggerProvider(config: ResolvedObserveConfig, resource: ReturnType<typeof createObserveResource>) {
+function createLoggerProvider(
+  config: ResolvedObserveConfig,
+  resource: ReturnType<typeof createObserveResource>,
+  diagnostics: ObserveDiagnostics,
+) {
   if (!config.logs) return undefined;
-  const exporter: LogRecordExporter = config.exporters?.log
+  const exporter = config.exporters?.log
     ?? new OTLPLogExporter(exporterConfig(config.endpoints.logs, config));
   const provider = new LoggerProvider({
     resource,
     processors: [new BatchLogRecordProcessor({
-      exporter,
+      exporter: withExporterDiagnostics(exporter, 'logs', diagnostics) as LogRecordExporter,
       exportTimeoutMillis: config.exportTimeoutMillis,
       maxQueueSize: 2_048,
       maxExportBatchSize: 512,
@@ -161,7 +220,11 @@ function createLoggerProvider(config: ResolvedObserveConfig, resource: ReturnTyp
 export function observe(options: ObserveOptions = {}): ObserveRuntime {
   if (activeRuntime?.started) return activeRuntime;
   const config = resolveObserveConfig(options);
-  if (!config.enabled) return new InactiveObserveHandle(config);
+  const diagnostics = new ObserveDiagnostics(config.diagnosticLogging, options.onError);
+  if (!config.enabled) {
+    diagnostics.inactive();
+    return new InactiveObserveHandle(config, diagnostics);
+  }
   let tracerProvider: NodeTracerProvider | undefined;
   let meterProvider: MeterProvider | undefined;
   let loggerProvider: LoggerProvider | undefined;
@@ -171,10 +234,11 @@ export function observe(options: ObserveOptions = {}): ObserveRuntime {
   const instrumentations: Instrumentation[] = [];
   try {
     const resource = createObserveResource(config);
-    meterProvider = createMeterProvider(config, resource);
+    meterProvider = createMeterProvider(config, resource, diagnostics);
     const meter = meterProvider?.getMeter(SDK_NAME, SDK_VERSION);
-    tracerProvider = createTraceProvider(config, resource);
-    loggerProvider = createLoggerProvider(config, resource);
+    const httpRequestMetrics = meter ? new HttpRequestMetrics(meter, config.serviceName) : undefined;
+    tracerProvider = createTraceProvider(config, resource, diagnostics);
+    loggerProvider = createLoggerProvider(config, resource, diagnostics);
     runtimeMetrics = meter ? new RuntimeMetrics(meter) : undefined;
     runtimeMetrics?.start();
 
@@ -195,7 +259,6 @@ export function observe(options: ObserveOptions = {}): ObserveRuntime {
 
     if (config.traces || config.metrics) {
       const safeHeaders = config.allowedHeaders.filter((header) => !isSensitiveKey(header));
-      const httpRequestMetrics = meter ? new HttpRequestMetrics(meter, config.serviceName) : undefined;
       instrumentations.push(new HttpInstrumentation({
         requireParentforOutgoingSpans: false,
         headersToSpanAttributes: {
@@ -231,14 +294,18 @@ export function observe(options: ObserveOptions = {}): ObserveRuntime {
       tracerProvider,
       meterProvider,
       loggerProvider,
+      httpRequestMetrics,
       runtimeMetrics,
       loggerInstrumentation,
       exceptionCapture,
       instrumentations,
+      diagnostics,
     );
+    diagnostics.activate();
     activeRuntime = runtime;
     return runtime;
-  } catch {
+  } catch (error) {
+    diagnostics.failure('sdk', 'initialization', error);
     loggerInstrumentation?.disable();
     runtimeMetrics?.stop();
     exceptionCapture?.stop();
@@ -250,7 +317,9 @@ export function observe(options: ObserveOptions = {}): ObserveRuntime {
       meterProvider?.shutdown(),
       loggerProvider?.shutdown(),
     ].filter((item): item is Promise<void> => Boolean(item)));
-    return new InactiveObserveHandle(config);
+    diagnostics.inactive();
+    if (config.failFast) throw toError(error);
+    return new InactiveObserveHandle(config, diagnostics);
   }
 }
 

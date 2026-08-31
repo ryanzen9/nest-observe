@@ -1,9 +1,10 @@
 import 'reflect-metadata';
-import { Controller, Inject, Injectable, Module } from '@nestjs/common';
+import { Controller, Inject, Injectable, Logger, Module } from '@nestjs/common';
 import { Test } from '@nestjs/testing';
+import type { LogRecordExporter, ReadableLogRecord } from '@opentelemetry/sdk-logs';
 import { AggregationTemporality, InMemoryMetricExporter, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { InMemorySpanExporter } from '@opentelemetry/sdk-trace-base';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { OBSERVE_HANDLE, ObserveModule } from '../src/nest/observe.module';
 import type { ObserveRuntime } from '../src/sdk';
 
@@ -55,5 +56,47 @@ describe('ObserveModule', () => {
       'OrdersController.list', 'OrdersService.list',
     ]));
     await moduleRef.close();
+  });
+
+  it('exposes exporter failures through the module runtime without breaking providers', async () => {
+    const failures: string[] = [];
+    const stderr = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const stdout = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const exporter: LogRecordExporter = {
+      export(_records: ReadableLogRecord[], callback: Parameters<LogRecordExporter['export']>[1]) {
+        callback({ code: 1, error: new Error('Unauthorized') });
+      },
+      forceFlush: () => Promise.resolve(),
+      shutdown: () => Promise.resolve(),
+    };
+    @Injectable()
+    class AppService {
+      private readonly logger = new Logger(AppService.name);
+      run() { this.logger.log('business continues'); }
+    }
+    @Module({
+      imports: [ObserveModule.forRoot({
+        traces: false,
+        metrics: false,
+        logs: true,
+        exporters: { log: exporter },
+        onError: (event) => failures.push(`${event.signal}:${event.stage}`),
+      })],
+      providers: [AppService],
+    })
+    class AppModule {}
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    await moduleRef.init();
+    expect(() => moduleRef.get(AppService).run()).not.toThrow();
+    const handle = moduleRef.get<ObserveRuntime>(OBSERVE_HANDLE);
+    handle.loggerProvider?.getLogger('module-diagnostics').emit({ body: 'probe' });
+    await handle.forceFlush();
+
+    expect(handle.status).toBe('degraded');
+    expect(failures).toEqual(['logs:export']);
+    await moduleRef.close();
+    stderr.mockRestore();
+    stdout.mockRestore();
   });
 });

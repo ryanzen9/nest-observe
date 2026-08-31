@@ -1,6 +1,8 @@
 import type { Meter, ObservableCallback } from '@opentelemetry/api';
+import { AggregationTemporality, InMemoryMetricExporter, PeriodicExportingMetricReader } from '@opentelemetry/sdk-metrics';
 import { describe, expect, it, vi } from 'vitest';
 import { RuntimeMetrics } from '../src/metrics/runtime-metrics';
+import { observe } from '../src/sdk';
 
 describe('RuntimeMetrics', () => {
   it('registers every required runtime instrument and can be stopped', () => {
@@ -38,5 +40,26 @@ describe('RuntimeMetrics', () => {
     expect(callbacks.length).toBeGreaterThanOrEqual(8);
     metrics.stop();
     expect(removeCallback).toHaveBeenCalled();
+  });
+
+  it('flushes observable runtime metrics before removing callbacks on shutdown', async () => {
+    const exporter = new InMemoryMetricExporter(AggregationTemporality.CUMULATIVE);
+    const reader = new PeriodicExportingMetricReader({
+      exporter,
+      exportIntervalMillis: 60_000,
+    });
+    const runtime = observe({
+      traces: false,
+      logs: false,
+      metrics: true,
+      exporters: { metricReader: reader },
+    });
+
+    await runtime.shutdown();
+
+    const names = exporter.getMetrics().flatMap((item) => (
+      item.scopeMetrics.flatMap((scope) => scope.metrics.map((metric) => metric.descriptor.name))
+    ));
+    expect(names).toContain('process.uptime');
   });
 });
