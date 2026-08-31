@@ -12,6 +12,15 @@
     "logging"
   ],
   "license": "MIT",
+  "homepage": "https://github.com/ryanzen9/nest-observe#readme",
+  "bugs": {
+    "url": "https://github.com/ryanzen9/nest-observe/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ryanzen9/nest-observe.git"
+  },
+  "packageManager": "pnpm@10.13.1",
   "sideEffects": [
     "./dist/register.js",
     "./dist/register.mjs"
@@ -44,6 +53,7 @@
   "files": [
     "dist",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

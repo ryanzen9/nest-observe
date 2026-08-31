@@ -9,6 +9,7 @@ import {
 import { InMemorySpanExporter } from "@opentelemetry/sdk-trace-base";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import { Trace } from "../src/decorators";
+import { SDK_NAME, SDK_VERSION } from "../src/resource";
 import { observe, type ObserveRuntime } from "../src/sdk";
 
 const spans = new InMemorySpanExporter();
@@ -71,7 +72,8 @@ describe("observe pipeline", () => {
       "service.name": "mall-api",
       "service.version": "1.2.3",
       "deployment.environment.name": "test",
-      "telemetry.sdk.name": "@ryanzeng/nest-observe",
+      "telemetry.sdk.name": SDK_NAME,
+      "telemetry.sdk.version": SDK_VERSION,
     });
     expect(traceSpan?.attributes.token).toBe("[REDACTED]");
     const log = logs

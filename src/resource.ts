@@ -4,10 +4,10 @@ import {
   type Resource,
 } from "@opentelemetry/resources";
 import { hostname } from "node:os";
+import pkg from "../package.json";
 import type { ResolvedObserveConfig } from "./types";
-
-export const SDK_NAME = "@ryanzeng/nest-observe";
-export const SDK_VERSION = "0.1.0";
+export const SDK_NAME = pkg.name;
+export const SDK_VERSION = pkg.version;
 
 export function createObserveResource(config: ResolvedObserveConfig): Resource {
   return defaultResource().merge(
