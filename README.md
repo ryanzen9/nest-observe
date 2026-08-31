@@ -1,4 +1,4 @@
-# @ryanzeng/nest-observe
+![header](https://capsule-render.vercel.app/api?type=waving&color=gradient&height=220&section=header&text=nest-observe&fontSize=48&fontColor=ffffff&animation=fadeIn)
 
 面向 NestJS 的零配置、Vendor Neutral Observability SDK。基于 OpenTelemetry，通过标准 OTLP 同时发送 Traces、Metrics 和 Logs，可连接 OpenObserve、Grafana、Jaeger、Datadog、Elastic 等兼容后端。
 
