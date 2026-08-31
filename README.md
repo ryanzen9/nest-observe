@@ -97,7 +97,7 @@ Traces：
 Logs：
 
 - 默认 Nest `Logger` 的 `verbose/debug/log/warn/error/fatal`
-- 对象和数组消息会在脱敏后序列化成 JSON 字符串，保证 OpenObserve 的标准 `body` 字段始终可见
+- 对象和数组消息会在脱敏后保持结构化 body，由观测后端或查询侧决定如何展开、展示或序列化
 - OTLP severity、`nestjs.context`、`trace_id`、`span_id`
 - `service.name`、`service.version`、`deployment.environment.name`
 - `StructuredLogEmitter` 抽象可用于后续 Pino/Winston adapter

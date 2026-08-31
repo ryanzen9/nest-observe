@@ -35,8 +35,27 @@ describe('NestLoggerInstrumentation', () => {
       span_id: spanContext.spanId,
       'nestjs.context': 'OrderService',
     });
-    expect(records[0]?.body).toBe('{"event":"created","token":"[REDACTED]"}');
+    expect(records[0]?.body).toEqual({ event: 'created', token: '[REDACTED]' });
     expect(String(records[2]?.body)).toContain('failed');
+  });
+
+  it('keeps arrays as structured bodies and redacts nested values', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const output = vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    instrumentation.enable();
+
+    new Logger('OrderService').log([
+      { event: 'created', password: 'secret' },
+      { orderId: 42 },
+    ]);
+
+    instrumentation.disable();
+    output.mockRestore();
+    expect(records[0]?.body).toEqual([
+      { event: 'created', password: '[REDACTED]' },
+      { orderId: 42 },
+    ]);
   });
 
   it('never lets an emitter failure affect application logging', () => {

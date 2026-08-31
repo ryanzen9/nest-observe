@@ -9,6 +9,12 @@ export interface TraceOptions {
 
 type TraceDecorator = MethodDecorator & ClassDecorator;
 
+function copyOwnMetadata(source: Function, target: Function): void {
+  for (const metadataKey of Reflect.getOwnMetadataKeys(source)) {
+    Reflect.defineMetadata(metadataKey, Reflect.getOwnMetadata(metadataKey, source), target);
+  }
+}
+
 function decorateMethod(
   target: object,
   propertyKey: string | symbol,
@@ -41,6 +47,7 @@ function decorateMethod(
     value: original.name,
     configurable: true,
   });
+  copyOwnMetadata(original, wrapped);
   markTraceDecorated(wrapped);
   descriptor.value = wrapped;
 }

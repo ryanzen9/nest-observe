@@ -1,4 +1,6 @@
 import { trace } from '@opentelemetry/api';
+import { Controller, Get, RequestMethod } from '@nestjs/common';
+import { METHOD_METADATA, PATH_METADATA } from '@nestjs/common/constants';
 import { InMemorySpanExporter, SimpleSpanProcessor } from '@opentelemetry/sdk-trace-base';
 import { NodeTracerProvider } from '@opentelemetry/sdk-trace-node';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -84,5 +86,28 @@ describe('@Trace()', () => {
     const names = exporter.getFinishedSpans().map((span) => span.name);
     expect(names).toContain('StatusService.run');
     expect(names).not.toContain('StatusService.health');
+  });
+
+  it('preserves Nest route metadata when tracing a controller class', () => {
+    @Trace()
+    @Controller('orders')
+    class OrdersController {
+      @Get(':id')
+      find() { return 'order'; }
+    }
+
+    expect(Reflect.getOwnMetadata(PATH_METADATA, OrdersController.prototype.find)).toBe(':id');
+    expect(Reflect.getOwnMetadata(METHOD_METADATA, OrdersController.prototype.find)).toBe(RequestMethod.GET);
+  });
+
+  it('preserves Nest route metadata when @Trace() wraps a routed method', () => {
+    class OrdersController {
+      @Trace()
+      @Get('search')
+      search() { return []; }
+    }
+
+    expect(Reflect.getOwnMetadata(PATH_METADATA, OrdersController.prototype.search)).toBe('search');
+    expect(Reflect.getOwnMetadata(METHOD_METADATA, OrdersController.prototype.search)).toBe(RequestMethod.GET);
   });
 });
