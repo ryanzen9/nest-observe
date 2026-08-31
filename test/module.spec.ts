@@ -99,4 +99,22 @@ describe('ObserveModule', () => {
     stderr.mockRestore();
     stdout.mockRestore();
   });
+
+  it('does not instrument an external client returned by a Symbol factory provider', async () => {
+    const CLIENT = Symbol('REDIS_CLIENT');
+    class RedisLikeClient {
+      get(key: string) { return `value:${key}`; }
+    }
+    @Module({
+      imports: [ObserveModule.forRoot({ logs: false, metrics: false })],
+      providers: [{ provide: CLIENT, useFactory: () => new RedisLikeClient() }],
+    })
+    class AppModule {}
+
+    const moduleRef = await Test.createTestingModule({ imports: [AppModule] }).compile();
+    await moduleRef.init();
+
+    expect(moduleRef.get<RedisLikeClient>(CLIENT).get('session')).toBe('value:session');
+    await moduleRef.close();
+  });
 });

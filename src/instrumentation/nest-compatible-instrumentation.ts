@@ -11,7 +11,8 @@ const SUPPORTED_NEST_VERSIONS = ['>=4.0.0 <13'];
 type NestWrapper = {
   instance?: object;
   metatype?: Function;
-  name?: string;
+  name?: unknown;
+  inject?: unknown[];
   token?: unknown;
   host?: {
     name?: string;
@@ -55,7 +56,8 @@ export class CompatibleNestInstrumentation extends NestInstrumentation {
               const instance = await original.apply(this, args);
               try {
                 const wrapper = args[1] as NestWrapper | undefined;
-                if (!instance || typeof instance !== 'object' || !wrapper?.metatype) return instance;
+                if (!instance || typeof instance !== 'object' || !wrapper?.metatype
+                  || wrapper.inject !== undefined) return instance;
                 if (['InternalCoreModule', 'ObserveModule', 'DiscoveryModule'].includes(wrapper.host?.name ?? '')) {
                   return instance;
                 }

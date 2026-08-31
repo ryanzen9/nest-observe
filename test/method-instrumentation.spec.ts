@@ -59,4 +59,27 @@ describe('NestMethodInstrumenter', () => {
     expect(spanExporter.getFinishedSpans().map((span) => span.name)).toContain('RequestScopedService.run');
     await Promise.all([tracerProvider.shutdown(), meterProvider.shutdown()]);
   });
+
+  it('safely normalizes a Symbol provider token used as the component name', async () => {
+    const spanExporter = new InMemorySpanExporter();
+    const tracerProvider = new NodeTracerProvider({ spanProcessors: [new SimpleSpanProcessor(spanExporter)] });
+    const meterProvider = new MeterProvider();
+    const instrumenter = new NestMethodInstrumenter(
+      tracerProvider.getTracer('test'),
+      meterProvider.getMeter('test'),
+    );
+    class SymbolProvider { get() { return 'value'; } }
+    const service = new SymbolProvider();
+
+    instrumenter.instrumentInstance(
+      service,
+      'provider',
+      Symbol('REDIS') as unknown as string,
+    );
+
+    expect(service.get()).toBe('value');
+    await tracerProvider.forceFlush();
+    expect(spanExporter.getFinishedSpans().map((span) => span.name)).toContain('Symbol(REDIS).get');
+    await Promise.all([tracerProvider.shutdown(), meterProvider.shutdown()]);
+  });
 });

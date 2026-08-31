@@ -19,14 +19,14 @@ export class NestMethodInstrumenter {
     this.errors = meter.createCounter('nestjs.method.errors', { unit: '{error}' });
   }
 
-  instrumentInstance(instance: object, kind: NestComponentKind, componentName?: string): void {
+  instrumentInstance(instance: object, kind: NestComponentKind, componentName?: unknown): void {
     const type = instance.constructor as Function;
     const prototype = Object.getPrototypeOf(instance) as object | null;
     if (!prototype) return;
     this.instrumentTarget(instance, prototype, type, kind, componentName);
   }
 
-  instrumentPrototype(type: Function, kind: NestComponentKind, componentName?: string): void {
+  instrumentPrototype(type: Function, kind: NestComponentKind, componentName?: unknown): void {
     const prototype = (type as { prototype?: object }).prototype;
     if (!prototype) return;
     this.instrumentTarget(prototype, prototype, type, kind, componentName);
@@ -37,7 +37,7 @@ export class NestMethodInstrumenter {
     prototype: object,
     type: Function,
     kind: NestComponentKind,
-    componentName?: string,
+    componentName?: unknown,
   ): void {
     if (isTraceIgnored(type)) return;
     const completed = this.instrumented.get(target) ?? new Set<string>();
@@ -49,7 +49,11 @@ export class NestMethodInstrumenter {
       if (!descriptor || typeof original !== 'function' || isTraceIgnored(original, type) || isTraceDecorated(original)) continue;
       const existing = Reflect.get(target, methodName) as unknown;
       if (typeof existing === 'function' && existing !== original && isTraceDecorated(existing)) continue;
-      const name = componentName || type.name || 'Anonymous';
+      const name = typeof componentName === 'symbol'
+        ? String(componentName)
+        : typeof componentName === 'string' && componentName
+          ? componentName
+          : type.name || 'Anonymous';
       const attributes: Record<string, string> = {
         [`nestjs.${kind}`]: name,
         'nestjs.method': methodName,

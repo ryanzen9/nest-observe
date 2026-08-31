@@ -46,4 +46,31 @@ describe('CompatibleNestInstrumentation', () => {
     instrumentation.disable();
     await Promise.all([tracerProvider.shutdown(), meterProvider.shutdown()]);
   });
+
+  it('skips external clients returned by factory providers in the injector hook', async () => {
+    const instrumentation = new CompatibleNestInstrumentation();
+    const [definition] = instrumentation.getModuleDefinitions();
+    const injectorFile = definition?.files.find((file) => file.name.endsWith('/injector/injector.js'));
+    class Injector {
+      async instantiateClass(_dependencies: unknown[], wrapper: { instance: object }) { return wrapper.instance; }
+    }
+    class RedisLikeClient { get(key: string) { return `value:${key}`; } }
+    const client = new RedisLikeClient();
+    const wrapper = {
+      instance: client,
+      metatype: () => client,
+      inject: [],
+      name: Symbol('REDIS_CLIENT'),
+      token: Symbol('REDIS_CLIENT'),
+      host: { name: 'RedisModule', controllers: new Map() },
+    };
+    const moduleExports = { Injector };
+    injectorFile?.patch?.(moduleExports, '12.0.1');
+
+    await new Injector().instantiateClass([], wrapper);
+    expect(client.get('session')).toBe('value:session');
+
+    injectorFile?.unpatch?.(moduleExports, '12.0.1');
+    instrumentation.disable();
+  });
 });

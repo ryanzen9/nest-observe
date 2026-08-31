@@ -59,7 +59,8 @@ export class NestHttpMetricsInterceptor implements NestInterceptor {
 type DiscoveredWrapper = {
   instance?: object;
   metatype?: Function;
-  name?: string;
+  name?: unknown;
+  inject?: unknown[];
   host?: { name?: string };
 };
 
@@ -91,7 +92,9 @@ class NestObserveExplorer implements OnModuleInit, OnApplicationShutdown {
     kind: 'provider' | 'controller',
   ): void {
     for (const wrapper of wrappers) {
-      if (!wrapper.metatype) continue;
+      // Factory providers may return arbitrary external clients (Redis, queues, SDKs).
+      // They are not Nest-owned class instances and must not be monkey-patched.
+      if (!wrapper.metatype || wrapper.inject !== undefined) continue;
       if (['ObserveModule', 'DiscoveryModule', 'InternalCoreModule'].includes(wrapper.host?.name ?? '')) continue;
       if ((wrapper.metatype as Function) === NestObserveExplorer) continue;
       if (wrapper.instance) {
