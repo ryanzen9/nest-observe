@@ -29,7 +29,10 @@ export class OrdersService {
 
   @Trace("order.failure")
   fail(id: string): never {
-    this.logger.error({ event: "order.failed", orderId: id });
-    throw new Error(`Unable to load order ${id}`);
+    const error = new Error(`Unable to load order ${id}`);
+    this.logger.error(error);
+    this.logger.error(error.message, error.stack);
+    this.logger.error(error.message, { event: "order.failed", orderId: id });
+    throw error;
   }
 }

@@ -37,6 +37,117 @@ describe('NestLoggerInstrumentation', () => {
     });
     expect(records[0]?.body).toEqual({ event: 'created', token: '[REDACTED]' });
     expect(String(records[2]?.body)).toContain('failed');
+    expect(records[2]?.attributes).toMatchObject({
+      'exception.type': 'Error',
+      'exception.message': 'failed',
+      'exception.stacktrace': expect.stringContaining('Error: failed'),
+    });
+  });
+
+  it('preserves the message-stack overload used by Logger instances', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const errorOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new Error('inventory unavailable');
+    instrumentation.enable();
+
+    new Logger('OrderService').error('reservation failed', error.stack);
+
+    instrumentation.disable();
+    errorOutput.mockRestore();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      body: 'reservation failed',
+      severityText: 'ERROR',
+      attributes: {
+        'nestjs.context': 'OrderService',
+        'exception.stacktrace': expect.stringContaining('Error: inventory unavailable'),
+      },
+    });
+  });
+
+  it('distinguishes the message-context overload from a stack', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const errorOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    instrumentation.enable();
+
+    new ConsoleLogger().error('reservation failed', 'OrderService');
+
+    instrumentation.disable();
+    errorOutput.mockRestore();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      body: 'reservation failed',
+      attributes: { 'nestjs.context': 'OrderService' },
+    });
+    expect(records[0]?.attributes).not.toHaveProperty('exception.stacktrace');
+  });
+
+  it('keeps the message as body when the second argument contains structured params', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const errorOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    instrumentation.enable();
+
+    new Logger('OrderService').error('order creation failed', {
+      event: 'order.failed',
+      orderId: 42,
+    });
+
+    instrumentation.disable();
+    errorOutput.mockRestore();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      body: 'order creation failed',
+      attributes: {
+        event: 'order.failed',
+        orderId: 42,
+        'nestjs.context': 'OrderService',
+      },
+    });
+  });
+
+  it('preserves explicit stack, context, and structured params', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const errorOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    const error = new Error('payment rejected');
+    instrumentation.enable();
+
+    new ConsoleLogger().error(
+      'checkout failed',
+      { orderId: 42, token: 'jwt-secret' },
+      error.stack,
+      'CheckoutService',
+    );
+
+    instrumentation.disable();
+    errorOutput.mockRestore();
+    expect(records).toHaveLength(1);
+    expect(records[0]).toMatchObject({
+      body: 'checkout failed',
+      attributes: {
+        orderId: 42,
+        token: '[REDACTED]',
+        'nestjs.context': 'CheckoutService',
+        'exception.stacktrace': expect.stringContaining('Error: payment rejected'),
+      },
+    });
+  });
+
+  it('emits every message selected by Nest error overload parsing', () => {
+    const records: StructuredLogRecord[] = [];
+    const instrumentation = new NestLoggerInstrumentation({ emit: (record) => records.push(record) });
+    const errorOutput = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    instrumentation.enable();
+
+    new ConsoleLogger().error('first failure', 'second failure', undefined, 'OrderService');
+
+    instrumentation.disable();
+    errorOutput.mockRestore();
+    expect(records.map((record) => record.body)).toEqual(['first failure', 'second failure']);
+    expect(records.every((record) => record.attributes['nestjs.context'] === 'OrderService')).toBe(true);
   });
 
   it('keeps arrays as structured bodies and redacts nested values', () => {

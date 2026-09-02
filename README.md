@@ -166,8 +166,10 @@ Traces：
 Logs：
 
 - 默认 Nest `Logger` 的 `verbose/debug/log/warn/error/fatal`
+- 遵循 Nest `ConsoleLogger` 的重载解析语义，保留 `error(message, stack?, context?)`、附加消息和结构化参数
+- `Error` 或显式 stack 会映射为 OTLP `exception.type`、`exception.message`、`exception.stacktrace` 属性
 - 尊重 Nest 11+ 的实例级日志级别过滤（`logLevels` / `setLogLevels` / `Logger.overrideLogger`），上传内容与控制台输出一致
-- 对象和数组消息会在脱敏后保持结构化 body，由观测后端或查询侧决定如何展开、展示或序列化
+- 对象和数组消息会在脱敏后保持结构化 body；附加的结构化参数会展开为 OTLP attributes，同时保持首个 message 为 body
 - OTLP severity、`nestjs.context`、`trace_id`、`span_id`
 - `service.name`、`service.version`、`deployment.environment.name`
 

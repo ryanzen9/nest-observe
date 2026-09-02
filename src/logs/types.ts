@@ -1,9 +1,9 @@
-import type { Attributes } from '@opentelemetry/api';
+import type { LogAttributes } from '@opentelemetry/api-logs';
 
 export interface StructuredLogRecord {
   body: unknown;
   severityText: 'TRACE' | 'DEBUG' | 'INFO' | 'WARN' | 'ERROR' | 'FATAL';
-  attributes: Attributes;
+  attributes: LogAttributes;
   timestamp?: number;
 }
 
